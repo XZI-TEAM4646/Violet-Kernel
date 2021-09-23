@@ -698,6 +698,20 @@ KBUILD_CFLAGS += $(call cc-ifversion, -gt, 0900, \
 			$(call cc-disable-warning,format,) \
 			$(call cc-disable-warning,array-bounds,) \
 			$(call cc-disable-warning,stringop-overflow,))
+
+ifdef CONFIG_LLVM_POLLY
+POLLY_FLAGS := -mllvm -polly \
+	     -mllvm -polly-run-dce \
+	     -mllvm -polly-run-inliner \
+	     -mllvm -polly-opt-fusion=max \
+	     -mllvm -polly-ast-use-context \
+	     -mllvm -polly-detect-keep-going \
+	     -mllvm -polly-vectorizer=stripmine \
+	     -mllvm -polly-invariant-load-hoisting
+
+OPT_FLAGS	+= $(POLLY_FLAGS)
+KBUILD_LDFLAGS	+= $(POLLY_FLAGS)
+endif
 endif
 
 KBUILD_CFLAGS += $(call cc-ifversion, -lt, 0409, \
