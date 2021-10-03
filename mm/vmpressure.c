@@ -425,7 +425,7 @@ static void vmpressure_global(gfp_t gfp, unsigned long scanned,
  * This function does not return any value.
  */
 void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
-		unsigned long scanned, unsigned long reclaimed, int order)
+		unsigned long scanned, unsigned long reclaimed)
 {
 	if (!memcg && tree)
 		vmpressure_global(gfp, scanned, reclaimed);
