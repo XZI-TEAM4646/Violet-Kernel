@@ -44,6 +44,12 @@ config THREAD_INFO_IN_TASK
 
 menu "General setup"
 
+config EX_DNL
+	bool "rev1.0"
+	default y
+	help
+	  Boost performance.
+
 config BROKEN
 	bool
 

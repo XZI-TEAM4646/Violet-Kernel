@@ -84,15 +84,24 @@ unsigned int sysctl_sched_cstate_aware = 1;
  *
  * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
  */
+#ifdef CONFIG_EX_DNL
 enum sched_tunable_scaling sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LINEAR;
+#else
+enum sched_tunable_scaling sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
+#endif
 
 /*
  * Minimal preemption granularity for CPU-bound tasks:
  *
  * (default: 0.75 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
+#ifdef CONFIG_EX_DNL // 1.00 msec
+unsigned int sysctl_sched_min_granularity		= 1000000ULL;
+unsigned int normalized_sysctl_sched_min_granularity	= 1000000ULL;
+#else
 unsigned int sysctl_sched_min_granularity		= 750000ULL;
 unsigned int normalized_sysctl_sched_min_granularity	= 750000ULL;
+#endif
 
 /*
  * This value is kept at sysctl_sched_latency/sysctl_sched_min_granularity
