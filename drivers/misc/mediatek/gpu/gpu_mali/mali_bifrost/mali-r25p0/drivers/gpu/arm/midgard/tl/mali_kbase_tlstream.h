@@ -1,7 +1,27 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
- * (C) COPYRIGHT 2015-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT ARM Limited. All rights reserved.
+ *
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, you can access it online at
+ * http://www.gnu.org/licenses/gpl-2.0.html.
+ *
+ * SPDX-License-Identifier: GPL-2.0
+ *
+ *//* SPDX-License-Identifier: GPL-2.0 */
+/*
+ *
+ * (C) COPYRIGHT 2015-2020 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -43,8 +63,6 @@
  * struct kbase_tlstream - timeline stream structure
  * @lock:              Message order lock
  * @buffer:            Array of buffers
- * @buffer.size:       Number of bytes in buffer
- * @buffer.data:       Buffer's data
  * @wbi:               Write buffer index
  * @rbi:               Read buffer index
  * @numbered:          If non-zero stream's packets are sequentially numbered
@@ -77,8 +95,8 @@ struct kbase_tlstream {
 	spinlock_t lock;
 
 	struct {
-		atomic_t size;
-		char data[PACKET_SIZE];
+		atomic_t size;              /* number of bytes in buffer */
+		char     data[PACKET_SIZE]; /* buffer's data */
 	} buffer[PACKET_COUNT];
 
 	atomic_t wbi;
@@ -163,10 +181,8 @@ void kbase_tlstream_msgbuf_release(struct kbase_tlstream *stream,
  * @stream:     Pointer to the stream structure
  *
  * Flush pending data in the timeline stream.
- *
- * Return: Number of bytes available flushed and available to be read
- *
  */
-size_t kbase_tlstream_flush_stream(struct kbase_tlstream *stream);
+void kbase_tlstream_flush_stream(struct kbase_tlstream *stream);
 
 #endif /* _KBASE_TLSTREAM_H */
+

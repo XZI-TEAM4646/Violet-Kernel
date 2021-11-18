@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  *
- * (C) COPYRIGHT 2012-2016, 2018, 2020-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2016, 2018, 2020 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
  * Foundation, and any use by you of this program is subject to the terms
- * of such GNU license.
+ * of such GNU licence.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -16,6 +16,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, you can access it online at
  * http://www.gnu.org/licenses/gpl-2.0.html.
+ *
+ * SPDX-License-Identifier: GPL-2.0
  *
  */
 
@@ -27,11 +29,8 @@
  */
 
 /**
- * Check whether a ctx has a certain attribute, and if so, retain that
+ * @brief Check whether a ctx has a certain attribute, and if so, retain that
  * attribute on the runpool.
- * @kbdev: Device pointer
- * @kctx:  KBase context
- * @attribute: Atribute to check/retain
  *
  * Requires:
  * - jsctx mutex
@@ -76,11 +75,8 @@ static bool kbasep_js_ctx_attr_runpool_retain_attr(struct kbase_device *kbdev, s
 }
 
 /**
- * Check whether a ctx has a certain attribute, and if so, release that
+ * @brief Check whether a ctx has a certain attribute, and if so, release that
  * attribute on the runpool.
- * @kbdev: Device pointer
- * @kctx:  KBase context
- * @attribute: Atribute to release
  *
  * Requires:
  * - jsctx mutex
@@ -124,11 +120,8 @@ static bool kbasep_js_ctx_attr_runpool_release_attr(struct kbase_device *kbdev, 
 }
 
 /**
- * Retain a certain attribute on a ctx, also retaining it on the runpool
+ * @brief Retain a certain attribute on a ctx, also retaining it on the runpool
  * if the context is scheduled.
- * @kbdev: Device pointer
- * @kctx:  KBase context
- * @attribute: Atribute to retain
  *
  * Requires:
  * - jsctx mutex
@@ -163,12 +156,9 @@ static bool kbasep_js_ctx_attr_ctx_retain_attr(struct kbase_device *kbdev, struc
 	return runpool_state_changed;
 }
 
-/**
- * Release a certain attribute on a ctx, also releasing it from the runpool
+/*
+ * @brief Release a certain attribute on a ctx, also releasing it from the runpool
  * if the context is scheduled.
- * @kbdev: Device pointer
- * @kctx:  KBase context
- * @attribute: Atribute to release
  *
  * Requires:
  * - jsctx mutex

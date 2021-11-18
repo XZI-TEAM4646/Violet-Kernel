@@ -1,7 +1,27 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
- * (C) COPYRIGHT 2010-2017, 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT ARM Limited. All rights reserved.
+ *
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, you can access it online at
+ * http://www.gnu.org/licenses/gpl-2.0.html.
+ *
+ * SPDX-License-Identifier: GPL-2.0
+ *
+ *//* SPDX-License-Identifier: GPL-2.0 */
+/*
+ *
+ * (C) COPYRIGHT 2010-2017, 2019-2020 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -20,7 +40,8 @@
  */
 
 /**
- * DOC: Configuration API and Attributes for KBase
+ * @file mali_kbase_config.h
+ * Configuration API and Attributes for KBase
  */
 
 #ifndef _KBASE_CONFIG_H_
@@ -31,11 +52,26 @@
 #include <mali_kbase_backend_config.h>
 #include <linux/rbtree.h>
 
+/**
+ * @addtogroup base_api
+ * @{
+ */
+
+/**
+ * @addtogroup base_kbase_api
+ * @{
+ */
+
+/**
+ * @addtogroup kbase_config Configuration API and Attributes
+ * @{
+ */
+
 /* Forward declaration of struct kbase_device */
 struct kbase_device;
 
 /**
- * struct kbase_platform_funcs_conf - Specifies platform init/term function pointers
+ * kbase_platform_funcs_conf - Specifies platform init/term function pointers
  *
  * Specifies the functions pointers for platform specific initialization and
  * termination. By default no functions are required. No additional platform
@@ -43,7 +79,7 @@ struct kbase_device;
  */
 struct kbase_platform_funcs_conf {
 	/**
-	 * @platform_init_func: platform specific init function pointer
+	 * platform_init_func - platform specific init function pointer
 	 * @kbdev - kbase_device pointer
 	 *
 	 * Returns 0 on success, negative error code otherwise.
@@ -58,7 +94,7 @@ struct kbase_platform_funcs_conf {
 	 */
 	int (*platform_init_func)(struct kbase_device *kbdev);
 	/**
-	 * @platform_term_func: platform specific termination function pointer
+	 * platform_term_func - platform specific termination function pointer
 	 * @kbdev - kbase_device pointer
 	 *
 	 * Function pointer for platform specific termination or NULL if no
@@ -222,15 +258,14 @@ struct kbase_gpu_clk_notifier_data {
 };
 
 /**
- * struct kbase_clk_rate_trace_op_conf - Specifies GPU clock rate trace
- * operations.
+ * kbase_clk_rate_trace_op_conf - Specifies GPU clock rate trace operations.
  *
  * Specifies the functions pointers for platform specific GPU clock rate trace
  * operations. By default no functions are required.
  */
 struct kbase_clk_rate_trace_op_conf {
 	/**
-	 * @enumerate_gpu_clk: Enumerate a GPU clock on the given index
+	 * enumerate_gpu_clk - Enumerate a GPU clock on the given index
 	 * @kbdev - kbase_device pointer
 	 * @index - GPU clock index
 	 *
@@ -244,7 +279,7 @@ struct kbase_clk_rate_trace_op_conf {
 		unsigned int index);
 
 	/**
-	 * @get_gpu_clk_rate: Get the current rate for an enumerated clock.
+	 * get_gpu_clk_rate - Get the current rate for an enumerated clock.
 	 * @kbdev          - kbase_device pointer
 	 * @gpu_clk_handle - Handle unique to the enumerated GPU clock
 	 *
@@ -254,7 +289,7 @@ struct kbase_clk_rate_trace_op_conf {
 		void *gpu_clk_handle);
 
 	/**
-	 * @gpu_clk_notifier_register: Register a clock rate change notifier.
+	 * gpu_clk_notifier_register - Register a clock rate change notifier.
 	 * @kbdev          - kbase_device pointer
 	 * @gpu_clk_handle - Handle unique to the enumerated GPU clock
 	 * @nb             - notifier block containing the callback function
@@ -273,7 +308,7 @@ struct kbase_clk_rate_trace_op_conf {
 		void *gpu_clk_handle, struct notifier_block *nb);
 
 	/**
-	 * @gpu_clk_notifier_unregister: Unregister clock rate change notifier
+	 * gpu_clk_notifier_unregister - Unregister clock rate change notifier
 	 * @kbdev          - kbase_device pointer
 	 * @gpu_clk_handle - Handle unique to the enumerated GPU clock
 	 * @nb             - notifier block containing the callback function
@@ -317,7 +352,7 @@ struct kbase_platform_config {
 #endif /* CONFIG_OF */
 
 /**
- * kbase_get_platform_config - Gets the pointer to platform config.
+ * @brief Gets the pointer to platform config.
  *
  * @return Pointer to the platform config
  */
@@ -367,5 +402,9 @@ int kbase_platform_register(void);
  */
 void kbase_platform_unregister(void);
 #endif
+
+	  /** @} *//* end group kbase_config */
+	  /** @} *//* end group base_kbase_api */
+	  /** @} *//* end group base_api */
 
 #endif				/* _KBASE_CONFIG_H_ */
