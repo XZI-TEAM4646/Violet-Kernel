@@ -83,19 +83,10 @@ static void submit_work_pagefault(struct kbase_device *kbdev, u32 as_nr,
 			.addr = fault->addr,
 		};
 
-		/*
-		 * A page fault work item could already be pending for the
-		 * context's address space, when the page fault occurs for
-		 * MCU's address space.
-		 */
-		if (!queue_work(as->pf_wq, &as->work_pagefault))
+		if (WARN_ON(!queue_work(as->pf_wq, &as->work_pagefault)))
 			kbase_ctx_sched_release_ctx(kctx);
-		else {
-			dev_dbg(kbdev->dev,
-				"Page fault is already pending for as %u\n",
-				as_nr);
+		else
 			atomic_inc(&kbdev->faults_pending);
-		}
 	}
 	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 }
@@ -126,9 +117,15 @@ void kbase_mmu_report_mcu_as_fault_and_reset(struct kbase_device *kbdev,
 	for (as_no = 1; as_no < kbdev->nr_hw_address_spaces; as_no++)
 		submit_work_pagefault(kbdev, as_no, fault);
 
+	/* MCU AS fault could mean hardware counters will stop working.
+	 * Put the backend into the unrecoverable error state to cause
+	 * current and subsequent counter operations to immediately
+	 * fail, avoiding the risk of a hang.
+	 */
+	kbase_hwcnt_backend_csf_on_unrecoverable_error(&kbdev->hwcnt_gpu_iface);
+
 	/* GPU reset is required to recover */
-	if (kbase_prepare_to_reset_gpu(kbdev,
-				       RESET_FLAGS_HWC_UNRECOVERABLE_ERROR))
+	if (kbase_prepare_to_reset_gpu(kbdev))
 		kbase_reset_gpu(kbdev);
 }
 KBASE_EXPORT_TEST_API(kbase_mmu_report_mcu_as_fault_and_reset);

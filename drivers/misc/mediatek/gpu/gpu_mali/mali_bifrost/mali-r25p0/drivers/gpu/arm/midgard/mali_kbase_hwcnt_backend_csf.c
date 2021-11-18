@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  *
- * (C) COPYRIGHT 2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2020-2021 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -127,31 +127,41 @@ enum kbase_hwcnt_backend_csf_enable_state {
  * struct kbase_hwcnt_backend_csf_info - Information used to create an instance
  *                                       of a CSF hardware counter backend.
  * @backend:                      Pointer to access CSF backend.
+ * @lock:                         Spinlock protecting backend and its internal
+ *                                states.
  * @fw_in_protected_mode:         True if FW is running in protected mode, else
  *                                false.
  * @unrecoverable_error_happened: True if an recoverable error happened, else
  *                                false.
- * @csf_if:                       CSF interface object pointer.
+ * @csf_if:                       CSF interface object pointer. Functions inside
+ *                                this interface MUST never be called while
+ *                                holding the spin lock, as that could cause
+ *                                deadlocks.
  * @ring_buf_cnt:                 Dump buffer count in the ring buffer.
  * @counter_set:                  The performance counter set to use.
  * @metadata:                     Hardware counter metadata.
- * @prfcnt_info:                  Performance counter information.
+ * @dump_bytes:                   Bytes of GPU memory required to perform a
+ *                                hardware counter dump.
+ * @gpu_info:                     GPU information to initialise HWC dump memory
+ *                                layout.
  */
 struct kbase_hwcnt_backend_csf_info {
 	struct kbase_hwcnt_backend_csf *backend;
+	spinlock_t lock;
 	bool fw_in_protected_mode;
 	bool unrecoverable_error_happened;
 	struct kbase_hwcnt_backend_csf_if *csf_if;
 	u32 ring_buf_cnt;
 	enum kbase_hwcnt_set counter_set;
 	const struct kbase_hwcnt_metadata *metadata;
-	struct kbase_hwcnt_backend_csf_if_prfcnt_info prfcnt_info;
+	size_t dump_bytes;
+	struct kbase_hwcnt_gpu_info gpu_info;
 };
 
 /**
  * struct kbase_hwcnt_csf_physical_layout - HWC sample memory physical layout
  *                                          information.
- * @fe_cnt:             Front end block count.
+ * @fe_cnt:             FroneEnd block count.
  * @tiler_cnt:          Tiler block count.
  * @mmu_l2_cnt:         Memory system(MMU and L2 cache) block count.
  * @shader_cnt:         Shader Core block count.
@@ -197,7 +207,7 @@ struct kbase_hwcnt_csf_physical_layout {
  *                              count for sample period.
  * @phys_layout:                Physical memory layout information of HWC
  *                              sample buffer.
- * @dump_completed:             Completion signaled by the dump worker when
+ * @dump_completed:             Completion signalled by the dump worker when
  *                              it is completed accumulating up to the
  *                              insert_index_to_accumulate.
  *                              Should be initialized to the "complete" state.
@@ -232,7 +242,7 @@ bool kbasep_hwcnt_backend_csf_backend_exists(
 	struct kbase_hwcnt_backend_csf_info *csf_info)
 {
 	WARN_ON(!csf_info);
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
+	lockdep_assert_held(&csf_info->lock);
 	return (csf_info->backend != NULL);
 }
 
@@ -270,9 +280,6 @@ kbasep_hwcnt_backend_csf_cc_update(struct kbase_hwcnt_backend_csf *backend_csf)
 	u64 cycle_counts[BASE_MAX_NR_CLOCKS_REGULATORS];
 	size_t clk;
 
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
-
 	backend_csf->info->csf_if->get_gpu_cycle_count(
 		backend_csf->info->csf_if->ctx, cycle_counts,
 		backend_csf->clk_enable_map);
@@ -303,9 +310,10 @@ kbasep_hwcnt_backend_csf_timestamp_ns(struct kbase_hwcnt_backend *backend)
 }
 
 /** kbasep_hwcnt_backend_csf_process_enable_map() - Process the enable_map to
- *                                                  guarantee headers are
- *                                                  enabled if any counter is
- *                                                  required.
+ *                                                  guarantee the header is
+ *                                                  enabled, the header will be
+ *                                                  used when do the samples
+ *                                                  delta calculation.
  *@phys_enable_map: HWC physical enable map to be processed.
  */
 static void kbasep_hwcnt_backend_csf_process_enable_map(
@@ -330,21 +338,21 @@ static void kbasep_hwcnt_backend_csf_process_enable_map(
 }
 
 static void kbasep_hwcnt_backend_csf_init_layout(
-	const struct kbase_hwcnt_backend_csf_if_prfcnt_info *prfcnt_info,
+	const struct kbase_hwcnt_gpu_info *gpu_info,
 	struct kbase_hwcnt_csf_physical_layout *phys_layout)
 {
-	WARN_ON(!prfcnt_info);
+	WARN_ON(!gpu_info);
 	WARN_ON(!phys_layout);
 
 	phys_layout->fe_cnt = 1;
 	phys_layout->tiler_cnt = 1;
-	phys_layout->mmu_l2_cnt = prfcnt_info->l2_count;
-	phys_layout->shader_cnt = fls64(prfcnt_info->core_mask);
+	phys_layout->mmu_l2_cnt = gpu_info->l2_count;
+	phys_layout->shader_cnt = fls64(gpu_info->core_mask);
 	phys_layout->block_cnt = phys_layout->fe_cnt + phys_layout->tiler_cnt +
 				 phys_layout->mmu_l2_cnt +
 				 phys_layout->shader_cnt;
 
-	phys_layout->shader_avail_mask = prfcnt_info->core_mask;
+	phys_layout->shader_avail_mask = gpu_info->core_mask;
 
 	phys_layout->headers_per_block = KBASE_HWCNT_V5_HEADERS_PER_BLOCK;
 	phys_layout->counters_per_block = KBASE_HWCNT_V5_COUNTERS_PER_BLOCK;
@@ -355,12 +363,9 @@ static void kbasep_hwcnt_backend_csf_init_layout(
 static void kbasep_hwcnt_backend_csf_reset_internal_buffers(
 	struct kbase_hwcnt_backend_csf *backend_csf)
 {
-	memset(backend_csf->to_user_buf, 0,
-	       backend_csf->info->prfcnt_info.dump_bytes);
-	memset(backend_csf->accum_buf, 0,
-	       backend_csf->info->prfcnt_info.dump_bytes);
-	memset(backend_csf->old_sample_buf, 0,
-	       backend_csf->info->prfcnt_info.dump_bytes);
+	memset(backend_csf->to_user_buf, 0, backend_csf->info->dump_bytes);
+	memset(backend_csf->accum_buf, 0, backend_csf->info->dump_bytes);
+	memset(backend_csf->old_sample_buf, 0, backend_csf->info->dump_bytes);
 }
 
 static void kbasep_hwcnt_backend_csf_zero_sample_prfcnt_en_header(
@@ -384,12 +389,12 @@ static void kbasep_hwcnt_backend_csf_zero_all_prfcnt_en_header(
 	u32 idx;
 	u32 *sample;
 	char *cpu_dump_base;
-	size_t dump_bytes = backend_csf->info->prfcnt_info.dump_bytes;
 
 	cpu_dump_base = (char *)backend_csf->ring_buf_cpu_base;
 
 	for (idx = 0; idx < backend_csf->info->ring_buf_cnt; idx++) {
-		sample = (u32 *)&cpu_dump_base[idx * dump_bytes];
+		sample = (u32 *)&cpu_dump_base[idx *
+					       backend_csf->info->dump_bytes];
 		kbasep_hwcnt_backend_csf_zero_sample_prfcnt_en_header(
 			backend_csf, sample);
 	}
@@ -400,20 +405,19 @@ static void kbasep_hwcnt_backend_csf_update_user_sample(
 {
 	/* Copy the data into the sample and wait for the user to get it. */
 	memcpy(backend_csf->to_user_buf, backend_csf->accum_buf,
-	       backend_csf->info->prfcnt_info.dump_bytes);
+	       backend_csf->info->dump_bytes);
 
 	/* After copied data into user sample, clear the accumulator values to
 	 * prepare for the next accumulator, such as the next request or
 	 * threshold.
 	 */
-	memset(backend_csf->accum_buf, 0,
-	       backend_csf->info->prfcnt_info.dump_bytes);
+	memset(backend_csf->accum_buf, 0, backend_csf->info->dump_bytes);
 }
 
 static void kbasep_hwcnt_backend_csf_accumulate_sample(
 	const struct kbase_hwcnt_csf_physical_layout *phys_layout,
 	size_t dump_bytes, u32 *accum_buf, const u32 *old_sample_buf,
-	const u32 *new_sample_buf, bool clearing_samples)
+	const u32 *new_sample_buf)
 {
 	size_t block_idx, ctr_idx;
 	const u32 *old_block = old_sample_buf;
@@ -421,8 +425,6 @@ static void kbasep_hwcnt_backend_csf_accumulate_sample(
 	u32 *acc_block = accum_buf;
 
 	for (block_idx = 0; block_idx < phys_layout->block_cnt; block_idx++) {
-		const u32 old_enable_mask =
-			old_block[phys_layout->offset_enable_mask];
 		const u32 new_enable_mask =
 			new_block[phys_layout->offset_enable_mask];
 
@@ -440,63 +442,11 @@ static void kbasep_hwcnt_backend_csf_accumulate_sample(
 			       phys_layout->headers_per_block *
 				       KBASE_HWCNT_VALUE_BYTES);
 
-			/* Accumulate counter samples
-			 *
-			 * When accumulating samples we need to take into
-			 * account whether the counter sampling method involves
-			 * clearing counters back to zero after each sample is
-			 * taken.
-			 *
-			 * The intention for CSF was that all HW should use
-			 * counters which wrap to zero when their maximum value
-			 * is reached. This, combined with non-clearing
-			 * sampling, enables multiple concurrent users to
-			 * request samples without interfering with each other.
-			 *
-			 * However some early HW may not support wrapping
-			 * counters, for these GPUs counters must be cleared on
-			 * sample to avoid loss of data due to counters
-			 * saturating at their maximum value.
-			 */
-			if (!clearing_samples) {
-				if (old_enable_mask == 0) {
-					/* Hardware block was previously
-					 * unavailable. Accumulate the new
-					 * counters only, as we know previous
-					 * values are zeroes.
-					 */
-					for (ctr_idx =
-						     phys_layout
-							     ->headers_per_block;
-					     ctr_idx <
-					     phys_layout->values_per_block;
-					     ctr_idx++) {
-						acc_block[ctr_idx] +=
-							new_block[ctr_idx];
-					}
-				} else {
-					/* Hardware block was previously
-					 * available. Accumulate the delta
-					 * between old and new counter values.
-					 */
-					for (ctr_idx =
-						     phys_layout
-							     ->headers_per_block;
-					     ctr_idx <
-					     phys_layout->values_per_block;
-					     ctr_idx++) {
-						acc_block[ctr_idx] +=
-							new_block[ctr_idx] -
-							old_block[ctr_idx];
-					}
-				}
-			} else {
-				for (ctr_idx = phys_layout->headers_per_block;
-				     ctr_idx < phys_layout->values_per_block;
-				     ctr_idx++) {
-					acc_block[ctr_idx] +=
-						new_block[ctr_idx];
-				}
+			/* Accumulate the counters. */
+			for (ctr_idx = phys_layout->headers_per_block;
+			     ctr_idx < phys_layout->values_per_block;
+			     ctr_idx++) {
+				acc_block[ctr_idx] += new_block[ctr_idx];
 			}
 		}
 		old_block += phys_layout->values_per_block;
@@ -517,11 +467,9 @@ static void kbasep_hwcnt_backend_csf_accumulate_samples(
 	u32 insert_index_to_stop)
 {
 	u32 raw_idx;
-	unsigned long flags;
 	u8 *cpu_dump_base = (u8 *)backend_csf->ring_buf_cpu_base;
 	const size_t ring_buf_cnt = backend_csf->info->ring_buf_cnt;
-	const size_t buf_dump_bytes = backend_csf->info->prfcnt_info.dump_bytes;
-	bool clearing_samples = backend_csf->info->prfcnt_info.clearing_samples;
+	const size_t buf_dump_bytes = backend_csf->info->dump_bytes;
 	u32 *old_sample_buf = backend_csf->old_sample_buf;
 	u32 *new_sample_buf;
 
@@ -530,10 +478,9 @@ static void kbasep_hwcnt_backend_csf_accumulate_samples(
 		return;
 
 	/* Sync all the buffers to CPU side before read the data. */
-	backend_csf->info->csf_if->ring_buf_sync(backend_csf->info->csf_if->ctx,
-						 backend_csf->ring_buf,
-						 extract_index_to_start,
-						 insert_index_to_stop, true);
+	backend_csf->info->csf_if->ring_buf_sync(
+		backend_csf->info->csf_if->ctx, backend_csf->ring_buf,
+		extract_index_to_start, (insert_index_to_stop - 1), true);
 
 	/* Consider u32 wrap case, '!=' is used here instead of '<' operator */
 	for (raw_idx = extract_index_to_start; raw_idx != insert_index_to_stop;
@@ -548,8 +495,7 @@ static void kbasep_hwcnt_backend_csf_accumulate_samples(
 
 		kbasep_hwcnt_backend_csf_accumulate_sample(
 			&backend_csf->phys_layout, buf_dump_bytes,
-			backend_csf->accum_buf, old_sample_buf, new_sample_buf,
-			clearing_samples);
+			backend_csf->accum_buf, old_sample_buf, new_sample_buf);
 
 		old_sample_buf = new_sample_buf;
 	}
@@ -568,28 +514,23 @@ static void kbasep_hwcnt_backend_csf_accumulate_samples(
 	}
 
 	/* Sync zeroed buffers to avoid coherency issues on future use. */
-	backend_csf->info->csf_if->ring_buf_sync(backend_csf->info->csf_if->ctx,
-						 backend_csf->ring_buf,
-						 extract_index_to_start,
-						 insert_index_to_stop, false);
+	backend_csf->info->csf_if->ring_buf_sync(
+		backend_csf->info->csf_if->ctx, backend_csf->ring_buf,
+		extract_index_to_start, (insert_index_to_stop - 1), false);
 
 	/* After consuming all samples between extract_idx and insert_idx,
 	 * set the raw extract index to insert_idx so that the sample buffers
 	 * can be released back to the ring buffer pool.
 	 */
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
 	backend_csf->info->csf_if->set_extract_index(
 		backend_csf->info->csf_if->ctx, insert_index_to_stop);
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
 }
 
 static void kbasep_hwcnt_backend_csf_change_es_and_wake_waiters(
 	struct kbase_hwcnt_backend_csf *backend_csf,
 	enum kbase_hwcnt_backend_csf_enable_state new_state)
 {
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
+	lockdep_assert_held(&backend_csf->info->lock);
 
 	if (backend_csf->enable_state != new_state) {
 		backend_csf->enable_state = new_state;
@@ -617,19 +558,21 @@ static void kbasep_hwcnt_backend_csf_dump_worker(struct work_struct *work)
 	WARN_ON(!work);
 	backend_csf = container_of(work, struct kbase_hwcnt_backend_csf,
 				   hwc_dump_work);
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 	/* Assert the backend is not destroyed. */
 	WARN_ON(backend_csf != backend_csf->info->backend);
 
 	/* The backend was disabled or had an error while the worker was being
 	 * launched.
 	 */
-	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
+	if (backend_csf->enable_state !=
+		    KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED &&
+	    backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
 		WARN_ON(backend_csf->dump_state !=
 			KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE);
 		WARN_ON(!completion_done(&backend_csf->dump_completed));
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return;
 	}
 
@@ -638,13 +581,11 @@ static void kbasep_hwcnt_backend_csf_dump_worker(struct work_struct *work)
 
 	backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_ACCUMULATING;
 	insert_index_to_acc = backend_csf->insert_index_to_accumulate;
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	/* Read the raw extract and insert indexes from the CSF interface. */
 	backend_csf->info->csf_if->get_indexes(backend_csf->info->csf_if->ctx,
 					       &extract_index, &insert_index);
-
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
 
 	/* Accumulate up to the insert we grabbed at the prfcnt request
 	 * interrupt.
@@ -658,18 +599,19 @@ static void kbasep_hwcnt_backend_csf_dump_worker(struct work_struct *work)
 	kbasep_hwcnt_backend_csf_update_user_sample(backend_csf);
 
 	/* Dump done, set state back to COMPLETED for next request. */
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 	/* Assert the backend is not destroyed. */
 	WARN_ON(backend_csf != backend_csf->info->backend);
 
 	/* The backend was disabled or had an error while we were accumulating.
 	 */
-	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
+	if (backend_csf->enable_state !=
+		    KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED &&
+	    backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
 		WARN_ON(backend_csf->dump_state !=
 			KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE);
 		WARN_ON(!completion_done(&backend_csf->dump_completed));
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return;
 	}
 
@@ -679,8 +621,7 @@ static void kbasep_hwcnt_backend_csf_dump_worker(struct work_struct *work)
 	/* Our work here is done - set the wait object and unblock waiters. */
 	backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED;
 	complete_all(&backend_csf->dump_completed);
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 }
 
 /**
@@ -702,21 +643,20 @@ static void kbasep_hwcnt_backend_csf_threshold_worker(struct work_struct *work)
 
 	backend_csf = container_of(work, struct kbase_hwcnt_backend_csf,
 				   hwc_threshold_work);
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
-
-	/* Assert the backend is not destroyed. */
-	WARN_ON(backend_csf != backend_csf->info->backend);
 
 	/* Read the raw extract and insert indexes from the CSF interface. */
 	backend_csf->info->csf_if->get_indexes(backend_csf->info->csf_if->ctx,
 					       &extract_index, &insert_index);
 
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
+	/* Assert the backend is not destroyed. */
+	WARN_ON(backend_csf != backend_csf->info->backend);
+
 	/* The backend was disabled or had an error while the worker was being
 	 * launched.
 	 */
 	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return;
 	}
 
@@ -727,19 +667,14 @@ static void kbasep_hwcnt_backend_csf_threshold_worker(struct work_struct *work)
 	if ((backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE) &&
 	    (backend_csf->dump_state !=
 	     KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED)) {
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return;
 	}
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
-	/* Accumulate everything we possibly can. We grabbed the insert index
-	 * immediately after we acquired the lock but before we checked whether
-	 * a concurrent dump was triggered. This ensures that if a concurrent
-	 * dump was triggered between releasing the lock and now, we know for a
-	 * fact that our insert will not exceed the concurrent dump's
-	 * insert_to_accumulate, so we don't risk accumulating too much data.
+	/* Accumulate everything we possibly can. We grabbed offsets before the
+	 * spin lock, so we know it is not possible for a concurrent dump's
+	 * insert_to_accumulate to exceed the insert we grabbed.
 	 */
 	kbasep_hwcnt_backend_csf_accumulate_samples(backend_csf, extract_index,
 						    insert_index);
@@ -750,31 +685,45 @@ static void kbasep_hwcnt_backend_csf_threshold_worker(struct work_struct *work)
 static void kbase_hwcnt_backend_csf_submit_dump_worker(
 	struct kbase_hwcnt_backend_csf_info *csf_info)
 {
+	unsigned long flags;
 	u32 extract_index;
+	u32 insert_index;
 
 	WARN_ON(!csf_info);
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
-	WARN_ON(!kbasep_hwcnt_backend_csf_backend_exists(csf_info));
-	WARN_ON(csf_info->backend->enable_state !=
-		KBASE_HWCNT_BACKEND_CSF_ENABLED);
-	WARN_ON(csf_info->backend->dump_state !=
-		KBASE_HWCNT_BACKEND_CSF_DUMP_QUERYING_INSERT);
+	csf_info->csf_if->get_indexes(csf_info->csf_if->ctx, &extract_index,
+				      &insert_index);
 
-	/* Save insert index now so that the dump worker only accumulates the
-	 * HWC data associated with this request. Extract index is not stored
-	 * as that needs to be checked when accumulating to prevent re-reading
-	 * buffers that have already been read and returned to the GPU.
+	spin_lock_irqsave(&csf_info->lock, flags);
+
+	/* Make sure the backend exists and is in the correct state.
+	 * A lot of things could have happened to it in the period before we
+	 * acquired the lock.
 	 */
-	csf_info->csf_if->get_indexes(
-		csf_info->csf_if->ctx, &extract_index,
-		&csf_info->backend->insert_index_to_accumulate);
-	csf_info->backend->dump_state =
-		KBASE_HWCNT_BACKEND_CSF_DUMP_WORKER_LAUNCHED;
+	if (kbasep_hwcnt_backend_csf_backend_exists(csf_info) &&
+	    (csf_info->backend->enable_state ==
+		     KBASE_HWCNT_BACKEND_CSF_ENABLED ||
+	     csf_info->backend->enable_state ==
+		     KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED) &&
+	    csf_info->backend->dump_state ==
+		    KBASE_HWCNT_BACKEND_CSF_DUMP_QUERYING_INSERT) {
+		csf_info->backend->insert_index_to_accumulate = insert_index;
+		csf_info->backend->dump_state =
+			KBASE_HWCNT_BACKEND_CSF_DUMP_WORKER_LAUNCHED;
 
-	/* Submit the accumulator task into the work queue. */
-	queue_work(csf_info->backend->hwc_dump_workq,
-		   &csf_info->backend->hwc_dump_work);
+		/* Submit the accumulator task into the work queue. */
+		while (true != queue_work(csf_info->backend->hwc_dump_workq,
+					  &csf_info->backend->hwc_dump_work)) {
+			/* Spin until we have guaranteed the work has been
+			 * submitted.
+			 * Without this there is a potential race where a prior
+			 * submission of the work may still technically be on
+			 * the queue, even though all of its work is complete.
+			 */
+		}
+	}
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 static void kbasep_hwcnt_backend_csf_get_physical_enable(
@@ -804,36 +753,59 @@ static void kbasep_hwcnt_backend_csf_get_physical_enable(
 	enable->clk_enable_map = enable_map->clk_enable_map;
 }
 
-/* CSF backend implementation of kbase_hwcnt_backend_dump_enable_nolock_fn */
-static int kbasep_hwcnt_backend_csf_dump_enable_nolock(
+static int kbasep_hwcnt_backend_csf_dump_enable_impl(
 	struct kbase_hwcnt_backend *backend,
-	const struct kbase_hwcnt_enable_map *enable_map)
+	const struct kbase_hwcnt_enable_map *enable_map,
+	struct kbase_hwcnt_backend_csf_if_enable *out_enable)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf *backend_csf =
 		(struct kbase_hwcnt_backend_csf *)backend;
 	struct kbase_hwcnt_backend_csf_if_enable enable;
+
+	WARN_ON(!out_enable);
 
 	if (!backend_csf || !enable_map ||
 	    (enable_map->metadata != backend_csf->info->metadata))
 		return -EINVAL;
 
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
-
 	kbasep_hwcnt_backend_csf_get_physical_enable(backend_csf, enable_map,
 						     &enable);
 
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 	/* enable_state should be DISABLED before we transfer it to enabled */
-	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_DISABLED)
+	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_DISABLED) {
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return -EIO;
+	}
 
 	backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE;
 	WARN_ON(!completion_done(&backend_csf->dump_completed));
 	kbasep_hwcnt_backend_csf_change_es_and_wake_waiters(
 		backend_csf, KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
-	backend_csf->info->csf_if->dump_enable(backend_csf->info->csf_if->ctx,
-					       backend_csf->ring_buf, &enable);
+	*out_enable = enable;
+	return 0;
+}
+
+/* CSF backend implementation of kbase_hwcnt_backend_dump_enable_nolock_fn */
+static int kbasep_hwcnt_backend_csf_dump_enable_nolock(
+	struct kbase_hwcnt_backend *backend,
+	const struct kbase_hwcnt_enable_map *enable_map)
+{
+	int errcode;
+	struct kbase_hwcnt_backend_csf *backend_csf =
+		(struct kbase_hwcnt_backend_csf *)backend;
+	struct kbase_hwcnt_backend_csf_if_enable enable;
+
+	errcode = kbasep_hwcnt_backend_csf_dump_enable_impl(backend, enable_map,
+							    &enable);
+	if (errcode)
+		return errcode;
+
+	backend_csf->info->csf_if->dump_enable_nolock(
+		backend_csf->info->csf_if->ctx, backend_csf->ring_buf, &enable);
 
 	kbasep_hwcnt_backend_csf_cc_initial_sample(backend_csf, enable_map);
 
@@ -846,33 +818,33 @@ static int kbasep_hwcnt_backend_csf_dump_enable(
 	const struct kbase_hwcnt_enable_map *enable_map)
 {
 	int errcode;
-	unsigned long flags;
 	struct kbase_hwcnt_backend_csf *backend_csf =
 		(struct kbase_hwcnt_backend_csf *)backend;
+	struct kbase_hwcnt_backend_csf_if_enable enable;
 
-	if (!backend_csf)
-		return -EINVAL;
+	errcode = kbasep_hwcnt_backend_csf_dump_enable_impl(backend, enable_map,
+							    &enable);
+	if (errcode)
+		return errcode;
 
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
-	errcode = kbasep_hwcnt_backend_csf_dump_enable_nolock(backend,
-							      enable_map);
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
-	return errcode;
+	backend_csf->info->csf_if->dump_enable(backend_csf->info->csf_if->ctx,
+					       backend_csf->ring_buf, &enable);
+
+	kbasep_hwcnt_backend_csf_cc_initial_sample(backend_csf, enable_map);
+
+	return 0;
 }
 
 static void kbasep_hwcnt_backend_csf_wait_enable_transition_complete(
 	struct kbase_hwcnt_backend_csf *backend_csf, unsigned long *lock_flags)
 {
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
+	lockdep_assert_held(&backend_csf->info->lock);
 
 	while ((backend_csf->enable_state ==
 		KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED) ||
 	       (backend_csf->enable_state ==
 		KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_DISABLED)) {
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, *lock_flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, *lock_flags);
 
 		wait_event(
 			backend_csf->enable_state_waitq,
@@ -881,8 +853,7 @@ static void kbasep_hwcnt_backend_csf_wait_enable_transition_complete(
 				(backend_csf->enable_state !=
 				 KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_DISABLED));
 
-		backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx,
-						lock_flags);
+		spin_lock_irqsave(&backend_csf->info->lock, *lock_flags);
 	}
 }
 
@@ -897,7 +868,7 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 
 	WARN_ON(!backend_csf);
 
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 
 	/* Make sure we wait until any previous enable or disable have completed
 	 * before doing anything.
@@ -911,8 +882,7 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 		/* If we are already disabled or in an unrecoverable error
 		 * state, there is nothing for us to do.
 		 */
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return;
 	}
 
@@ -931,8 +901,7 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 	WARN_ON(backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE);
 	WARN_ON(!completion_done(&backend_csf->dump_completed));
 
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	/* Block until any async work has completed. We have transitioned out of
 	 * the ENABLED state so we can guarantee no new work will concurrently
@@ -940,16 +909,23 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 	 */
 	flush_workqueue(backend_csf->hwc_dump_workq);
 
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
-
 	if (do_disable)
 		backend_csf->info->csf_if->dump_disable(
 			backend_csf->info->csf_if->ctx);
+
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 
 	kbasep_hwcnt_backend_csf_wait_enable_transition_complete(backend_csf,
 								 &flags);
 
 	switch (backend_csf->enable_state) {
+	case KBASE_HWCNT_BACKEND_CSF_DISABLED:
+	case KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED:
+	case KBASE_HWCNT_BACKEND_CSF_ENABLED:
+	case KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_DISABLED:
+	case KBASE_HWCNT_BACKEND_CSF_UNRECOVERABLE_ERROR:
+		WARN_ON(true);
+		break;
 	case KBASE_HWCNT_BACKEND_CSF_DISABLED_WAIT_FOR_WORKER:
 		kbasep_hwcnt_backend_csf_change_es_and_wake_waiters(
 			backend_csf, KBASE_HWCNT_BACKEND_CSF_DISABLED);
@@ -959,13 +935,9 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 			backend_csf,
 			KBASE_HWCNT_BACKEND_CSF_UNRECOVERABLE_ERROR);
 		break;
-	default:
-		WARN_ON(true);
-		break;
 	}
 
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	/* After disable, zero the header of all buffers in the ring buffer back
 	 * to 0 to prepare for the next enable.
@@ -975,7 +947,7 @@ kbasep_hwcnt_backend_csf_dump_disable(struct kbase_hwcnt_backend *backend)
 	/* Sync zeroed buffers to avoid coherency issues on future use. */
 	backend_csf->info->csf_if->ring_buf_sync(
 		backend_csf->info->csf_if->ctx, backend_csf->ring_buf, 0,
-		backend_csf->info->ring_buf_cnt, false);
+		(backend_csf->info->ring_buf_cnt - 1), false);
 
 	/* Reset accumulator, old_sample_buf and user_sample to all-0 to prepare
 	 * for next enable.
@@ -996,27 +968,12 @@ kbasep_hwcnt_backend_csf_dump_request(struct kbase_hwcnt_backend *backend,
 	if (!backend_csf)
 		return -EINVAL;
 
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
-
-	/* If we're transitioning to enabled there's nothing to accumulate, and
-	 * the user dump buffer is already zeroed. We can just short circuit to
-	 * the DUMP_COMPLETED state.
-	 */
-	if (backend_csf->enable_state ==
-	    KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED) {
-		backend_csf->dump_state =
-			KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED;
-		*dump_time_ns = kbasep_hwcnt_backend_csf_timestamp_ns(backend);
-		kbasep_hwcnt_backend_csf_cc_update(backend_csf);
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
-		return 0;
-	}
-
-	/* Otherwise, make sure we're already enabled. */
-	if (backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) {
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
+	/* Make sure we are enabled or becoming enabled. */
+	if ((backend_csf->enable_state != KBASE_HWCNT_BACKEND_CSF_ENABLED) &&
+	    (backend_csf->enable_state !=
+	     KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED)) {
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		return -EIO;
 	}
 
@@ -1026,12 +983,25 @@ kbasep_hwcnt_backend_csf_dump_request(struct kbase_hwcnt_backend *backend,
 	if ((backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE) &&
 	    (backend_csf->dump_state !=
 	     KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED)) {
-		backend_csf->info->csf_if->unlock(
-			backend_csf->info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 		/* HWC is disabled or another dump is ongoing, or we are on
 		 * fault.
 		 */
 		return -EIO;
+	}
+
+	/* If we are transitioning to enabled there is nothing to accumulate,
+	 * and the user dump buffer is already zeroed.
+	 * We can just short circuit to the DUMP_COMPLETED state.
+	 */
+	if (backend_csf->enable_state ==
+	    KBASE_HWCNT_BACKEND_CSF_TRANSITIONING_TO_ENABLED) {
+		backend_csf->dump_state =
+			KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED;
+		spin_unlock_irqrestore(&backend_csf->info->lock, flags);
+		*dump_time_ns = kbasep_hwcnt_backend_csf_timestamp_ns(backend);
+		kbasep_hwcnt_backend_csf_cc_update(backend_csf);
+		return 0;
 	}
 
 	/* Reset the completion so dump_wait() has something to wait on. */
@@ -1052,6 +1022,7 @@ kbasep_hwcnt_backend_csf_dump_request(struct kbase_hwcnt_backend *backend,
 		backend_csf->dump_state =
 			KBASE_HWCNT_BACKEND_CSF_DUMP_QUERYING_INSERT;
 	}
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	/* CSF firmware might enter protected mode now, but still call request.
 	 * That is fine, as we changed state while holding the lock, so the
@@ -1065,14 +1036,13 @@ kbasep_hwcnt_backend_csf_dump_request(struct kbase_hwcnt_backend *backend,
 	*dump_time_ns = kbasep_hwcnt_backend_csf_timestamp_ns(backend);
 	kbasep_hwcnt_backend_csf_cc_update(backend_csf);
 
-	if (do_request)
+	if (do_request) {
 		backend_csf->info->csf_if->dump_request(
 			backend_csf->info->csf_if->ctx);
-	else
+	} else {
 		kbase_hwcnt_backend_csf_submit_dump_worker(backend_csf->info);
+	}
 
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
 	return 0;
 }
 
@@ -1090,14 +1060,13 @@ kbasep_hwcnt_backend_csf_dump_wait(struct kbase_hwcnt_backend *backend)
 
 	wait_for_completion(&backend_csf->dump_completed);
 
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 	/* Make sure the last dump actually succeeded. */
 	errcode = (backend_csf->dump_state ==
 		   KBASE_HWCNT_BACKEND_CSF_DUMP_COMPLETED) ?
 			  0 :
 			  -EIO;
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	return errcode;
 }
@@ -1175,8 +1144,10 @@ kbasep_hwcnt_backend_csf_destroy(struct kbase_hwcnt_backend_csf *backend_csf)
 
 	destroy_workqueue(backend_csf->hwc_dump_workq);
 
-	backend_csf->info->csf_if->ring_buf_free(backend_csf->info->csf_if->ctx,
-						 backend_csf->ring_buf);
+	if (backend_csf->info->csf_if->ring_buf_free) {
+		backend_csf->info->csf_if->ring_buf_free(
+			backend_csf->info->csf_if->ctx, backend_csf->ring_buf);
+	}
 
 	kfree(backend_csf->accum_buf);
 	backend_csf->accum_buf = NULL;
@@ -1212,21 +1183,18 @@ kbasep_hwcnt_backend_csf_create(struct kbase_hwcnt_backend_csf_info *csf_info,
 		goto alloc_error;
 
 	backend_csf->info = csf_info;
-	kbasep_hwcnt_backend_csf_init_layout(&csf_info->prfcnt_info,
+	kbasep_hwcnt_backend_csf_init_layout(&csf_info->gpu_info,
 					     &backend_csf->phys_layout);
 
-	backend_csf->accum_buf =
-		kzalloc(csf_info->prfcnt_info.dump_bytes, GFP_KERNEL);
+	backend_csf->accum_buf = kzalloc(csf_info->dump_bytes, GFP_KERNEL);
 	if (!backend_csf->accum_buf)
 		goto err_alloc_acc_buf;
 
-	backend_csf->old_sample_buf =
-		kzalloc(csf_info->prfcnt_info.dump_bytes, GFP_KERNEL);
+	backend_csf->old_sample_buf = kzalloc(csf_info->dump_bytes, GFP_KERNEL);
 	if (!backend_csf->old_sample_buf)
 		goto err_alloc_pre_sample_buf;
 
-	backend_csf->to_user_buf =
-		kzalloc(csf_info->prfcnt_info.dump_bytes, GFP_KERNEL);
+	backend_csf->to_user_buf = kzalloc(csf_info->dump_bytes, GFP_KERNEL);
 	if (!backend_csf->to_user_buf)
 		goto err_alloc_user_sample_buf;
 
@@ -1242,7 +1210,7 @@ kbasep_hwcnt_backend_csf_create(struct kbase_hwcnt_backend_csf_info *csf_info,
 	/* Sync zeroed buffers to avoid coherency issues on use. */
 	backend_csf->info->csf_if->ring_buf_sync(
 		backend_csf->info->csf_if->ctx, backend_csf->ring_buf, 0,
-		backend_csf->info->ring_buf_cnt, false);
+		(backend_csf->info->ring_buf_cnt - 1), false);
 
 	init_completion(&backend_csf->dump_completed);
 
@@ -1310,17 +1278,17 @@ kbasep_hwcnt_backend_csf_init(const struct kbase_hwcnt_backend_info *info,
 	/* If it was not created before, attach it to csf_info.
 	 * Use spin lock to avoid concurrent initialization.
 	 */
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&csf_info->lock, flags);
 	if (csf_info->backend == NULL) {
 		csf_info->backend = backend_csf;
 		*out_backend = (struct kbase_hwcnt_backend *)backend_csf;
 		success = true;
-		if (csf_info->unrecoverable_error_happened)
+		if (csf_info->unrecoverable_error_happened) {
 			backend_csf->enable_state =
 				KBASE_HWCNT_BACKEND_CSF_UNRECOVERABLE_ERROR;
+		}
 	}
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 
 	/* Destroy the new created backend if the backend has already created
 	 * before. In normal case, this won't happen if the client call init()
@@ -1349,10 +1317,9 @@ static void kbasep_hwcnt_backend_csf_term(struct kbase_hwcnt_backend *backend)
 	/* Set the backend in csf_info to NULL so we won't handle any external
 	 * notification anymore since we are terminating.
 	 */
-	backend_csf->info->csf_if->lock(backend_csf->info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&backend_csf->info->lock, flags);
 	backend_csf->info->backend = NULL;
-	backend_csf->info->csf_if->unlock(backend_csf->info->csf_if->ctx,
-					  flags);
+	spin_unlock_irqrestore(&backend_csf->info->lock, flags);
 
 	kbasep_hwcnt_backend_csf_destroy(backend_csf);
 }
@@ -1403,6 +1370,8 @@ static int kbasep_hwcnt_backend_csf_info_create(
 	if (!info)
 		return -ENOMEM;
 
+	spin_lock_init(&info->lock);
+
 #if defined(CONFIG_MALI_PRFCNT_SET_SECONDARY)
 	info->counter_set = KBASE_HWCNT_SET_SECONDARY;
 #elif defined(CONFIG_MALI_PRFCNT_SET_TERTIARY)
@@ -1436,12 +1405,11 @@ kbasep_hwcnt_backend_csf_metadata(const struct kbase_hwcnt_backend_info *info)
 }
 
 static void kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
-	struct kbase_hwcnt_backend_csf *backend_csf)
+	struct kbase_hwcnt_backend_csf *backend_csf, unsigned long *lock_flags)
 {
 	bool do_disable = false;
 
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
+	lockdep_assert_held(&backend_csf->info->lock);
 
 	/* We are already in or transitioning to the unrecoverable error state.
 	 * Early out.
@@ -1483,16 +1451,18 @@ static void kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
 	 * disabled, - we don't want to disable twice if an unrecoverable error
 	 * happens while we are disabling.
 	 */
-	if (do_disable)
+	if (do_disable) {
+		spin_unlock_irqrestore(&backend_csf->info->lock, *lock_flags);
 		backend_csf->info->csf_if->dump_disable(
 			backend_csf->info->csf_if->ctx);
+		spin_lock_irqsave(&backend_csf->info->lock, *lock_flags);
+	}
 }
 
 static void kbasep_hwcnt_backend_csf_handle_recoverable_error(
-	struct kbase_hwcnt_backend_csf *backend_csf)
+	struct kbase_hwcnt_backend_csf *backend_csf, unsigned long *lock_flags)
 {
-	backend_csf->info->csf_if->assert_lock_held(
-		backend_csf->info->csf_if->ctx);
+	lockdep_assert_held(&backend_csf->info->lock);
 
 	switch (backend_csf->enable_state) {
 	case KBASE_HWCNT_BACKEND_CSF_DISABLED:
@@ -1508,8 +1478,8 @@ static void kbasep_hwcnt_backend_csf_handle_recoverable_error(
 		/* A seemingly recoverable error that occurs while we are
 		 * transitioning to enabled is probably unrecoverable.
 		 */
-		kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
-			backend_csf);
+		kbasep_hwcnt_backend_csf_handle_unrecoverable_error(backend_csf,
+								    lock_flags);
 		return;
 	case KBASE_HWCNT_BACKEND_CSF_ENABLED:
 		/* Start transitioning to the disabled state. We can't wait for
@@ -1526,8 +1496,14 @@ static void kbasep_hwcnt_backend_csf_handle_recoverable_error(
 		backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_IDLE;
 		complete_all(&backend_csf->dump_completed);
 
+		/* Unlock spin lock before we call csf_if disable(). */
+		spin_unlock_irqrestore(&backend_csf->info->lock, *lock_flags);
+
 		backend_csf->info->csf_if->dump_disable(
 			backend_csf->info->csf_if->ctx);
+
+		/* Lock spin lock again to match the spin lock pairs. */
+		spin_lock_irqsave(&backend_csf->info->lock, *lock_flags);
 		return;
 	}
 }
@@ -1535,27 +1511,44 @@ static void kbasep_hwcnt_backend_csf_handle_recoverable_error(
 void kbase_hwcnt_backend_csf_protm_entered(
 	struct kbase_hwcnt_backend_interface *iface)
 {
-	struct kbase_hwcnt_backend_csf_info *csf_info =
-		(struct kbase_hwcnt_backend_csf_info *)iface->info;
+	unsigned long flags;
+	struct kbase_hwcnt_backend_csf_info *csf_info;
+	struct kbase_hwcnt_backend_csf *backend_csf;
 
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
+	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
+
+	spin_lock_irqsave(&csf_info->lock, flags);
 	csf_info->fw_in_protected_mode = true;
 
-	/* Call on_prfcnt_sample() to trigger collection of the protected mode
-	 * entry auto-sample if there is currently a pending dump request.
-	 */
-	kbase_hwcnt_backend_csf_on_prfcnt_sample(iface);
+	/* Early out if the backend does not exist. */
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
+		return;
+	}
+
+	backend_csf = csf_info->backend;
+	/* If we are not in REQUESTED state, we don't need to do the dumping. */
+	if (backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_REQUESTED) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
+		return;
+	}
+	backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_QUERYING_INSERT;
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
+	kbase_hwcnt_backend_csf_submit_dump_worker(csf_info);
 }
 
 void kbase_hwcnt_backend_csf_protm_exited(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
 
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
+	spin_lock_irqsave(&csf_info->lock, flags);
 	csf_info->fw_in_protected_mode = false;
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_unrecoverable_error(
@@ -1566,17 +1559,18 @@ void kbase_hwcnt_backend_csf_on_unrecoverable_error(
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
 
-	csf_info->csf_if->lock(csf_info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&csf_info->lock, flags);
 	csf_info->unrecoverable_error_happened = true;
 	/* Early out if the backend does not exist. */
 	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
-		csf_info->csf_if->unlock(csf_info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
 	}
 
-	kbasep_hwcnt_backend_csf_handle_unrecoverable_error(csf_info->backend);
+	kbasep_hwcnt_backend_csf_handle_unrecoverable_error(csf_info->backend,
+							    &flags);
 
-	csf_info->csf_if->unlock(csf_info->csf_if->ctx, flags);
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_before_reset(
@@ -1588,11 +1582,11 @@ void kbase_hwcnt_backend_csf_on_before_reset(
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
 
-	csf_info->csf_if->lock(csf_info->csf_if->ctx, &flags);
+	spin_lock_irqsave(&csf_info->lock, flags);
 	csf_info->unrecoverable_error_happened = false;
 	/* Early out if the backend does not exist. */
 	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
-		csf_info->csf_if->unlock(csf_info->csf_if->ctx, flags);
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
 	}
 	backend_csf = csf_info->backend;
@@ -1611,7 +1605,7 @@ void kbase_hwcnt_backend_csf_on_before_reset(
 		 * really matter, the power is being pulled.
 		 */
 		kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
-			csf_info->backend);
+			csf_info->backend, &flags);
 	}
 
 	/* A reset is the only way to exit the unrecoverable error state */
@@ -1621,66 +1615,81 @@ void kbase_hwcnt_backend_csf_on_before_reset(
 			backend_csf, KBASE_HWCNT_BACKEND_CSF_DISABLED);
 	}
 
-	csf_info->csf_if->unlock(csf_info->csf_if->ctx, flags);
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_prfcnt_sample(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 	struct kbase_hwcnt_backend_csf *backend_csf;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
+	spin_lock_irqsave(&csf_info->lock, flags);
 	/* Early out if the backend does not exist. */
-	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info))
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 	backend_csf = csf_info->backend;
 
 	/* If the current state is not REQUESTED, this HWC sample will be
 	 * skipped and processed in next dump_request.
 	 */
-	if (backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_REQUESTED)
+	if (backend_csf->dump_state != KBASE_HWCNT_BACKEND_CSF_DUMP_REQUESTED) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 	backend_csf->dump_state = KBASE_HWCNT_BACKEND_CSF_DUMP_QUERYING_INSERT;
 
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 	kbase_hwcnt_backend_csf_submit_dump_worker(csf_info);
 }
 
 void kbase_hwcnt_backend_csf_on_prfcnt_threshold(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 	struct kbase_hwcnt_backend_csf *backend_csf;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
+	spin_lock_irqsave(&csf_info->lock, flags);
 	/* Early out if the backend does not exist. */
-	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info))
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 	backend_csf = csf_info->backend;
 
-	if (backend_csf->enable_state == KBASE_HWCNT_BACKEND_CSF_ENABLED)
+	if (backend_csf->enable_state == KBASE_HWCNT_BACKEND_CSF_ENABLED) {
 		/* Submit the threshold work into the work queue to consume the
 		 * available samples.
 		 */
 		queue_work(backend_csf->hwc_dump_workq,
 			   &backend_csf->hwc_threshold_work);
+	}
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_prfcnt_overflow(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
+	spin_lock_irqsave(&csf_info->lock, flags);
 	/* Early out if the backend does not exist. */
-	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info))
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 
 	/* Called when an overflow occurs. We treat this as a recoverable error,
 	 * so we start transitioning to the disabled state.
@@ -1689,21 +1698,27 @@ void kbase_hwcnt_backend_csf_on_prfcnt_overflow(
 	 * complex recovery code when we can just turn ourselves off instead for
 	 * a while.
 	 */
-	kbasep_hwcnt_backend_csf_handle_recoverable_error(csf_info->backend);
+	kbasep_hwcnt_backend_csf_handle_recoverable_error(csf_info->backend,
+							  &flags);
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_prfcnt_enable(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 	struct kbase_hwcnt_backend_csf *backend_csf;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
+	spin_lock_irqsave(&csf_info->lock, flags);
 	/* Early out if the backend does not exist. */
-	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info))
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 	backend_csf = csf_info->backend;
 
 	if (backend_csf->enable_state ==
@@ -1720,22 +1735,27 @@ void kbase_hwcnt_backend_csf_on_prfcnt_enable(
 		 * we reset.
 		 */
 		kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
-			csf_info->backend);
+			csf_info->backend, &flags);
 	}
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 void kbase_hwcnt_backend_csf_on_prfcnt_disable(
 	struct kbase_hwcnt_backend_interface *iface)
 {
+	unsigned long flags;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
 	struct kbase_hwcnt_backend_csf *backend_csf;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
-	csf_info->csf_if->assert_lock_held(csf_info->csf_if->ctx);
 
+	spin_lock_irqsave(&csf_info->lock, flags);
 	/* Early out if the backend does not exist. */
-	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info))
+	if (!kbasep_hwcnt_backend_csf_backend_exists(csf_info)) {
+		spin_unlock_irqrestore(&csf_info->lock, flags);
 		return;
+	}
 	backend_csf = csf_info->backend;
 
 	if (backend_csf->enable_state ==
@@ -1753,8 +1773,10 @@ void kbase_hwcnt_backend_csf_on_prfcnt_disable(
 		 * we reset.
 		 */
 		kbasep_hwcnt_backend_csf_handle_unrecoverable_error(
-			csf_info->backend);
+			csf_info->backend, &flags);
 	}
+
+	spin_unlock_irqrestore(&csf_info->lock, flags);
 }
 
 int kbase_hwcnt_backend_csf_metadata_init(
@@ -1762,29 +1784,28 @@ int kbase_hwcnt_backend_csf_metadata_init(
 {
 	int errcode;
 	struct kbase_hwcnt_backend_csf_info *csf_info;
-	struct kbase_hwcnt_gpu_info gpu_info;
 
 	if (!iface)
 		return -EINVAL;
 
 	csf_info = (struct kbase_hwcnt_backend_csf_info *)iface->info;
 
-	WARN_ON(!csf_info->csf_if->get_prfcnt_info);
-
-	csf_info->csf_if->get_prfcnt_info(csf_info->csf_if->ctx,
-					  &csf_info->prfcnt_info);
+	WARN_ON(!csf_info->csf_if->get_gpu_info);
+	csf_info->csf_if->get_gpu_info(csf_info->csf_if->ctx,
+				       &csf_info->dump_bytes,
+				       &csf_info->gpu_info.l2_count,
+				       &csf_info->gpu_info.core_mask,
+				       &csf_info->gpu_info.clk_cnt);
 
 	/* The clock domain counts should not exceed the number of maximum
 	 * number of clock regulators.
 	 */
-	if (csf_info->prfcnt_info.clk_cnt > BASE_MAX_NR_CLOCKS_REGULATORS)
+	if (csf_info->gpu_info.clk_cnt > BASE_MAX_NR_CLOCKS_REGULATORS)
 		return -EIO;
 
-	gpu_info.l2_count = csf_info->prfcnt_info.l2_count;
-	gpu_info.core_mask = csf_info->prfcnt_info.core_mask;
-	gpu_info.clk_cnt = csf_info->prfcnt_info.clk_cnt;
-	errcode = kbase_hwcnt_csf_metadata_create(
-		&gpu_info, csf_info->counter_set, &csf_info->metadata);
+	errcode = kbase_hwcnt_csf_metadata_create(&csf_info->gpu_info,
+						  csf_info->counter_set,
+						  &csf_info->metadata);
 	if (errcode)
 		return errcode;
 
@@ -1792,8 +1813,7 @@ int kbase_hwcnt_backend_csf_metadata_init(
 	 * Dump abstraction size should be exactly the same size and layout as
 	 * the physical dump size, for backwards compatibility.
 	 */
-	WARN_ON(csf_info->prfcnt_info.dump_bytes !=
-		csf_info->metadata->dump_buf_bytes);
+	WARN_ON(csf_info->dump_bytes != csf_info->metadata->dump_buf_bytes);
 
 	return 0;
 }
@@ -1848,7 +1868,8 @@ int kbase_hwcnt_backend_csf_create(struct kbase_hwcnt_backend_csf_if *csf_if,
 	return 0;
 }
 
-void kbase_hwcnt_backend_csf_destroy(struct kbase_hwcnt_backend_interface *iface)
+void kbase_hwcnt_backend_csf_destroy(
+	struct kbase_hwcnt_backend_interface *iface)
 {
 	if (!iface)
 		return;

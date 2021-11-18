@@ -222,20 +222,23 @@ void kbase_ctx_sched_release_ctx_lock(struct kbase_context *kctx);
 
 #if MALI_USE_CSF
 /**
- * kbase_ctx_sched_inc_refcount_if_as_valid - Refcount the context if it has GPU
- *                                            address space slot assigned to it.
+ * kbase_ctx_sched_refcount_mmu_flush - Refcount the context for the MMU flush
+ *                                      operation.
  *
- * @kctx: Context to be refcounted
+ * @kctx: Context to be refcounted.
+ * @sync: Flag passed to the caller function kbase_mmu_flush_invalidate().
  *
- * This function takes a reference on the context if it has a GPU address space
- * slot assigned to it. The address space slot will not be available for
- * re-assignment until the reference is released.
+ * This function takes a reference on the context for the MMU flush operation.
+ * The refcount is taken only if the context is busy/active.
+ * If the context isn't active but has a GPU address space slot assigned to it
+ * then a flag is set to indicate that MMU flush operation is pending, which
+ * will be performed when the context becomes active.
  *
  * Return: true if refcount succeeded and the address space slot will not be
- * reassigned, false if the refcount failed (because the address space slot
- * was not assigned).
+ * reassigned, false if the refcount failed (because the context was inactive)
  */
-bool kbase_ctx_sched_inc_refcount_if_as_valid(struct kbase_context *kctx);
+bool kbase_ctx_sched_refcount_mmu_flush(struct kbase_context *kctx,
+					bool sync);
 #endif
 
 #endif /* _KBASE_CTX_SCHED_H_ */

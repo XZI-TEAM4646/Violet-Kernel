@@ -69,9 +69,17 @@ static bool kbase_gpu_fault_interrupt(struct kbase_device *kbdev)
 		if (!as_valid || (as_nr == MCU_AS_NR)) {
 			kbase_report_gpu_fault(kbdev, status, as_nr, as_valid);
 
+			/* MCU bus fault could mean hardware counters will stop
+			 * working.
+			 * Put the backend into the unrecoverable error state to
+			 * cause current and subsequent counter operations to
+			 * immediately fail, avoiding the risk of a hang.
+			 */
+			kbase_hwcnt_backend_csf_on_unrecoverable_error(
+				&kbdev->hwcnt_gpu_iface);
+
 			dev_err(kbdev->dev, "GPU bus fault triggering gpu-reset ...\n");
-			if (kbase_prepare_to_reset_gpu(
-				    kbdev, RESET_FLAGS_HWC_UNRECOVERABLE_ERROR))
+			if (kbase_prepare_to_reset_gpu(kbdev))
 				kbase_reset_gpu(kbdev);
 		} else {
 			/* Handle Bus fault */
@@ -125,8 +133,16 @@ void kbase_gpu_interrupt(struct kbase_device *kbdev, u32 val)
 		}
 		kbase_csf_scheduler_spin_unlock(kbdev, flags);
 
-		if (kbase_prepare_to_reset_gpu(
-			    kbdev, RESET_FLAGS_HWC_UNRECOVERABLE_ERROR))
+		/* Protected fault means we're unlikely to have the counter
+		 * operations we might do during reset acknowledged.
+		 * Put the backend into the unrecoverable error state to cause
+		 * current and subsequent counter operations to immediately
+		 * fail, avoiding the risk of a hang.
+		 */
+		kbase_hwcnt_backend_csf_on_unrecoverable_error(
+			&kbdev->hwcnt_gpu_iface);
+
+		if (kbase_prepare_to_reset_gpu(kbdev))
 			kbase_reset_gpu(kbdev);
 	}
 
