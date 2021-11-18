@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2011-2020 ARM Limited. All rights reserved.
@@ -361,7 +360,11 @@ static enum hrtimer_restart kbasep_vinstr_dump_timer(struct hrtimer *timer)
 	 * cancelled, and the worker itself won't reschedule this timer if
 	 * suspend_count != 0.
 	 */
-	kbase_hwcnt_virtualizer_queue_work(vctx->hvirt, &vctx->dump_work);
+#if KERNEL_VERSION(3, 16, 0) > LINUX_VERSION_CODE
+	queue_work(system_wq, &vctx->dump_work);
+#else
+	queue_work(system_highpri_wq, &vctx->dump_work);
+#endif
 	return HRTIMER_NORESTART;
 }
 
@@ -564,8 +567,11 @@ void kbase_vinstr_resume(struct kbase_vinstr_context *vctx)
 			}
 
 			if (has_periodic_clients)
-				kbase_hwcnt_virtualizer_queue_work(
-					vctx->hvirt, &vctx->dump_work);
+#if KERNEL_VERSION(3, 16, 0) > LINUX_VERSION_CODE
+				queue_work(system_wq, &vctx->dump_work);
+#else
+				queue_work(system_highpri_wq, &vctx->dump_work);
+#endif
 		}
 	}
 
@@ -828,8 +834,11 @@ static long kbasep_vinstr_hwcnt_reader_ioctl_set_interval(
 	 * worker is already queued.
 	 */
 	if ((interval != 0) && (cli->vctx->suspend_count == 0))
-		kbase_hwcnt_virtualizer_queue_work(cli->vctx->hvirt,
-						   &cli->vctx->dump_work);
+#if KERNEL_VERSION(3, 16, 0) > LINUX_VERSION_CODE
+		queue_work(system_wq, &cli->vctx->dump_work);
+#else
+		queue_work(system_highpri_wq, &cli->vctx->dump_work);
+#endif
 
 	mutex_unlock(&cli->vctx->lock);
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2017-2020 ARM Limited. All rights reserved.
@@ -29,7 +28,7 @@
 #include "mali_kbase_ipa.h"
 #include "mali_kbase_ipa_debugfs.h"
 
-#if (KERNEL_VERSION(4, 7, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
 #define DEFINE_DEBUGFS_ATTRIBUTE DEFINE_SIMPLE_ATTRIBUTE
 #endif
 
@@ -161,8 +160,7 @@ int kbase_ipa_model_param_add(struct kbase_ipa_model *model, const char *name,
 		return -ENOMEM;
 
 	/* 'name' is stack-allocated for array elements, so copy it into
-	 * heap-allocated storage
-	 */
+	 * heap-allocated storage */
 	param->name = kstrdup(name, GFP_KERNEL);
 
 	if (!param->name) {

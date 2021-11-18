@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2020 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -17,25 +17,6 @@
  * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  * SPDX-License-Identifier: GPL-2.0
- *
- *//* SPDX-License-Identifier: GPL-2.0 */
-/*
- *
- * (C) COPYRIGHT 2014-2020 ARM Limited. All rights reserved.
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU license.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, you can access it online at
- * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  */
 
@@ -631,6 +612,7 @@ static const enum base_hw_issue base_hw_issues_tGRx_r0p0[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 
@@ -639,6 +621,7 @@ static const enum base_hw_issue base_hw_issues_model_tGRx[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 
@@ -646,6 +629,7 @@ static const enum base_hw_issue base_hw_issues_tVAx_r0p0[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 
@@ -654,6 +638,7 @@ static const enum base_hw_issue base_hw_issues_model_tVAx[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 
@@ -661,6 +646,7 @@ static const enum base_hw_issue base_hw_issues_tTUx_r0p0[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 
@@ -669,6 +655,7 @@ static const enum base_hw_issue base_hw_issues_model_tTUx[] = {
 	BASE_HW_ISSUE_9435,
 	BASE_HW_ISSUE_TSIX_2033,
 	BASE_HW_ISSUE_TTRX_1337,
+	BASE_HW_ISSUE_GPU2019_3212,
 	BASE_HW_ISSUE_END
 };
 

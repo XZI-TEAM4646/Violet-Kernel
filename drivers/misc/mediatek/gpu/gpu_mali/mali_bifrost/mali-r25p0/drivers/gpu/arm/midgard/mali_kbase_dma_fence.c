@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2011-2016, 2020 ARM Limited. All rights reserved.
@@ -57,7 +56,7 @@ static int
 kbase_dma_fence_lock_reservations(struct kbase_dma_fence_resv_info *info,
 				  struct ww_acquire_ctx *ctx)
 {
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	struct reservation_object *content_res = NULL;
 #else
 	struct dma_resv *content_res = NULL;
@@ -207,7 +206,7 @@ out:
 }
 
 static void
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 kbase_dma_fence_cb(struct fence *fence, struct fence_cb *cb)
 #else
 kbase_dma_fence_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
@@ -227,7 +226,7 @@ kbase_dma_fence_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
 		kbase_dma_fence_queue_work(katom);
 }
 
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 static int
 kbase_dma_fence_add_reservation_callback(struct kbase_jd_atom *katom,
 					 struct reservation_object *resv,
@@ -239,7 +238,7 @@ kbase_dma_fence_add_reservation_callback(struct kbase_jd_atom *katom,
 					 bool exclusive)
 #endif
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *excl_fence = NULL;
 	struct fence **shared_fences = NULL;
 #else
@@ -303,7 +302,7 @@ out:
 	return err;
 }
 
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 void kbase_dma_fence_add_reservation(struct reservation_object *resv,
 				     struct kbase_dma_fence_resv_info *info,
 				     bool exclusive)
@@ -332,7 +331,7 @@ int kbase_dma_fence_wait(struct kbase_jd_atom *katom,
 			 struct kbase_dma_fence_resv_info *info)
 {
 	int err, i;
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;
@@ -361,7 +360,7 @@ int kbase_dma_fence_wait(struct kbase_jd_atom *katom,
 	}
 
 	for (i = 0; i < info->dma_fence_resv_count; i++) {
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 		struct reservation_object *obj = info->resv_objs[i];
 #else
 		struct dma_resv *obj = info->resv_objs[i];

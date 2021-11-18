@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2012-2020 ARM Limited. All rights reserved.
@@ -63,7 +62,7 @@ int kbase_sync_fence_stream_create(const char *name, int *const out_fd)
 #if !MALI_USE_CSF
 int kbase_sync_fence_out_create(struct kbase_jd_atom *katom, int stream_fd)
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;
@@ -108,7 +107,7 @@ int kbase_sync_fence_out_create(struct kbase_jd_atom *katom, int stream_fd)
 
 int kbase_sync_fence_in_from_fd(struct kbase_jd_atom *katom, int fd)
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence = sync_file_get_fence(fd);
 #else
 	struct dma_fence *fence = sync_file_get_fence(fd);
@@ -125,7 +124,7 @@ int kbase_sync_fence_in_from_fd(struct kbase_jd_atom *katom, int fd)
 
 int kbase_sync_fence_validate(int fd)
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence = sync_file_get_fence(fd);
 #else
 	struct dma_fence *fence = sync_file_get_fence(fd);
@@ -161,7 +160,7 @@ kbase_sync_fence_out_trigger(struct kbase_jd_atom *katom, int result)
 	return (result != 0) ? BASE_JD_EVENT_JOB_CANCELLED : BASE_JD_EVENT_DONE;
 }
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 static void kbase_fence_wait_callback(struct fence *fence,
 				      struct fence_cb *cb)
 #else
@@ -204,7 +203,7 @@ static void kbase_fence_wait_callback(struct dma_fence *fence,
 int kbase_sync_fence_in_wait(struct kbase_jd_atom *katom)
 {
 	int err;
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;
@@ -237,8 +236,8 @@ int kbase_sync_fence_in_wait(struct kbase_jd_atom *katom)
 		katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
 
 		/* We should cause the dependent jobs in the bag to be failed,
-		 * to do this we schedule the work queue to complete this job
-		 */
+		 * to do this we schedule the work queue to complete this job */
+
 		INIT_WORK(&katom->work, kbase_sync_fence_wait_worker);
 		queue_work(katom->kctx->jctx.job_done_wq, &katom->work);
 	}
@@ -250,8 +249,7 @@ void kbase_sync_fence_in_cancel_wait(struct kbase_jd_atom *katom)
 {
 	if (!kbase_fence_free_callbacks(katom)) {
 		/* The wait wasn't cancelled -
-		 * leave the cleanup for kbase_fence_wait_callback
-		 */
+		 * leave the cleanup for kbase_fence_wait_callback */
 		return;
 	}
 
@@ -327,7 +325,7 @@ void kbase_sync_fence_info_get(struct dma_fence *fence,
 int kbase_sync_fence_in_info_get(struct kbase_jd_atom *katom,
 				 struct kbase_sync_fence_info *info)
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;
@@ -347,7 +345,7 @@ int kbase_sync_fence_in_info_get(struct kbase_jd_atom *katom,
 int kbase_sync_fence_out_info_get(struct kbase_jd_atom *katom,
 				  struct kbase_sync_fence_info *info)
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;

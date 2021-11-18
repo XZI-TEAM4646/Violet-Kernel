@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2012-2014, 2017-2018, 2020 ARM Limited. All rights reserved.
@@ -38,7 +37,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/file.h>
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 
 #include <linux/fence.h>
 
@@ -61,7 +60,7 @@
 
 #include <linux/dma-fence.h>
 
-#if (KERNEL_VERSION(4, 11, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0))
 #define dma_fence_get_status(a) (dma_fence_is_signaled(a) ? \
 	(a)->status ?: 1 \
 	: 0)
@@ -102,7 +101,7 @@ static struct file_operations dma_buf_lock_fops =
 
 typedef struct dma_buf_lock_resource
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence fence;
 #else
 	struct dma_fence fence;
@@ -128,7 +127,7 @@ typedef struct dma_buf_lock_resource
  * @node:     List head for linking this callback to the lock resource
  */
 struct dma_buf_lock_fence_cb {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence_cb fence_cb;
 	struct fence *fence;
 #else
@@ -152,7 +151,7 @@ static void dma_buf_lock_dounlock(struct kref *ref);
 static DEFINE_SPINLOCK(dma_buf_lock_fence_lock);
 
 static const char *
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 dma_buf_lock_fence_get_driver_name(struct fence *fence)
 #else
 dma_buf_lock_fence_get_driver_name(struct dma_fence *fence)
@@ -162,7 +161,7 @@ dma_buf_lock_fence_get_driver_name(struct dma_fence *fence)
 }
 
 static const char *
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 dma_buf_lock_fence_get_timeline_name(struct fence *fence)
 #else
 dma_buf_lock_fence_get_timeline_name(struct dma_fence *fence)
@@ -172,7 +171,7 @@ dma_buf_lock_fence_get_timeline_name(struct dma_fence *fence)
 }
 
 static bool
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 dma_buf_lock_fence_enable_signaling(struct fence *fence)
 #else
 dma_buf_lock_fence_enable_signaling(struct dma_fence *fence)
@@ -181,7 +180,7 @@ dma_buf_lock_fence_enable_signaling(struct dma_fence *fence)
 	return true;
 }
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 const struct fence_ops dma_buf_lock_fence_ops = {
 	.wait = fence_default_wait,
 #else
@@ -236,7 +235,7 @@ dma_buf_lock_fence_work(struct work_struct *pwork)
 }
 
 static void
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 dma_buf_lock_fence_callback(struct fence *fence, struct fence_cb *cb)
 #else
 dma_buf_lock_fence_callback(struct dma_fence *fence, struct dma_fence_cb *cb)
@@ -257,13 +256,14 @@ dma_buf_lock_fence_callback(struct dma_fence *fence, struct dma_fence_cb *cb)
 		atomic_set(&resource->locked, 1);
 		wake_up(&resource->wait);
 
-		if (resource->exclusive)
+		if (resource->exclusive) {
 			/* Warn if the work was already queued */
 			WARN_ON(!schedule_work(&resource->work));
+		}
 	}
 }
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 static int
 dma_buf_lock_fence_add_callback(dma_buf_lock_resource *resource,
 				struct fence *fence,
@@ -317,7 +317,7 @@ dma_buf_lock_fence_add_callback(dma_buf_lock_resource *resource,
 	return err;
 }
 
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 static int
 dma_buf_lock_add_fence_reservation_callback(dma_buf_lock_resource *resource,
 					    struct reservation_object *resv,
@@ -328,7 +328,7 @@ dma_buf_lock_add_fence_reservation_callback(dma_buf_lock_resource *resource,
 					    bool exclusive)
 #endif
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *excl_fence = NULL;
 	struct fence **shared_fences = NULL;
 #else
@@ -399,7 +399,7 @@ static int
 dma_buf_lock_acquire_fence_reservation(dma_buf_lock_resource *resource,
 				       struct ww_acquire_ctx *ctx)
 {
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 	struct reservation_object *content_resv = NULL;
 #else
 	struct dma_resv *content_resv = NULL;
@@ -482,16 +482,21 @@ static unsigned int dma_buf_lock_handle_poll(struct file *file,
 #if DMA_BUF_LOCK_DEBUG
 	printk("dma_buf_lock_handle_poll\n");
 #endif
-	if (atomic_read(&resource->locked) == 1) {
+	if (1 == atomic_read(&resource->locked))
+	{
 		/* Resources have been locked */
 		ret = POLLIN | POLLRDNORM;
 		if (resource->exclusive)
+		{
 			ret |=  POLLOUT | POLLWRNORM;
+		}
 	}
 	else
 	{
 		if (!poll_does_not_wait(wait))
+		{
 			poll_wait(file, &resource->wait, wait);
+		}
 	}
 #if DMA_BUF_LOCK_DEBUG
 	printk("dma_buf_lock_handle_poll : return %i\n", ret);
@@ -530,19 +535,29 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 	int i;
 	int ret;
 
-	if (request->list_of_dma_buf_fds == NULL)
+	if (NULL == request->list_of_dma_buf_fds)
+	{
 		return -EINVAL;
+	}
 	if (request->count <= 0)
+	{
 		return -EINVAL;
+	}
 	if (request->count > DMA_BUF_LOCK_BUF_MAX)
+	{
 		return -EINVAL;
+	}
 	if (request->exclusive != DMA_BUF_LOCK_NONEXCLUSIVE &&
 	    request->exclusive != DMA_BUF_LOCK_EXCLUSIVE)
+	{
 		return -EINVAL;
+	}
 
 	resource = kzalloc(sizeof(dma_buf_lock_resource), GFP_KERNEL);
-	if (resource == NULL)
+	if (NULL == resource)
+	{
 		return -ENOMEM;
+	}
 
 	atomic_set(&resource->locked, 0);
 	kref_init(&resource->refcount);
@@ -554,7 +569,8 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 	size = request->count * sizeof(int);
 	resource->list_of_dma_buf_fds = kmalloc(size, GFP_KERNEL);
 
-	if (resource->list_of_dma_buf_fds == NULL) {
+	if (NULL == resource->list_of_dma_buf_fds)
+	{
 		kfree(resource);
 		return -ENOMEM;
 	}
@@ -563,7 +579,8 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 	size = sizeof(struct dma_buf *) * request->count;
 	resource->dma_bufs = kmalloc(size, GFP_KERNEL);
 
-	if (resource->dma_bufs == NULL) {
+	if (NULL == resource->dma_bufs)
+	{
 		kfree(resource->list_of_dma_buf_fds);
 		kfree(resource);
 		return -ENOMEM;
@@ -571,9 +588,8 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 
 	/* Copy requested list of dma_buf_fds from user space */
 	size = request->count * sizeof(int);
-	if (copy_from_user(resource->list_of_dma_buf_fds,
-			   (void __user *)request->list_of_dma_buf_fds,
-			   size) != 0) {
+	if (0 != copy_from_user(resource->list_of_dma_buf_fds, (void __user *)request->list_of_dma_buf_fds, size))
+	{
 		kfree(resource->list_of_dma_buf_fds);
 		kfree(resource->dma_bufs);
 		kfree(resource);
@@ -581,7 +597,9 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 	}
 #if DMA_BUF_LOCK_DEBUG
 	for (i = 0; i < request->count; i++)
+	{
 		printk("dma_buf %i = %X\n", i, resource->list_of_dma_buf_fds[i]);
+	}
 #endif
 
 	/* Initialize the fence associated with dma_buf_lock resource */
@@ -612,7 +630,8 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 		}
 
 		/*Check the reservation object associated with dma_buf */
-		if (resource->dma_bufs[i]->resv == NULL) {
+		if (NULL == resource->dma_bufs[i]->resv)
+		{
 			mutex_lock(&dma_buf_lock_mutex);
 			kref_put(&resource->refcount, dma_buf_lock_dounlock);
 			mutex_unlock(&dma_buf_lock_mutex);
@@ -671,7 +690,7 @@ static int dma_buf_lock_dolock(dma_buf_lock_k_request *request)
 		kref_get(&resource->refcount);
 
 	for (i = 0; i < request->count; i++) {
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
 		struct reservation_object *resv = resource->dma_bufs[i]->resv;
 #else
 		struct dma_resv *resv = resource->dma_bufs[i]->resv;
@@ -777,21 +796,27 @@ static int __init dma_buf_lock_init(void)
 #endif
 	err = alloc_chrdev_region(&dma_buf_lock_dev, 0, 1, dma_buf_lock_dev_name);
 
-	if (err == 0) {
+	if (0 == err)
+	{
 		cdev_init(&dma_buf_lock_cdev, &dma_buf_lock_fops);
 
 		err = cdev_add(&dma_buf_lock_cdev, dma_buf_lock_dev, 1);
 
-		if (err == 0) {
+		if (0 == err)
+		{
 			dma_buf_lock_class = class_create(THIS_MODULE, dma_buf_lock_dev_name);
 			if (IS_ERR(dma_buf_lock_class))
+			{
 				err = PTR_ERR(dma_buf_lock_class);
+			}
 			else
 			{
 				struct device *mdev;
 				mdev = device_create(dma_buf_lock_class, NULL, dma_buf_lock_dev, NULL, dma_buf_lock_dev_name);
 				if (!IS_ERR(mdev))
+				{
 					return 0;
+				}
 
 				err = PTR_ERR(mdev);
 				class_destroy(dma_buf_lock_class);
@@ -850,17 +875,26 @@ static int dma_buf_lock_ioctl(struct inode *inode, struct file *filp, unsigned i
 	int size = _IOC_SIZE(cmd);
 
 	if (_IOC_TYPE(cmd) != DMA_BUF_LOCK_IOC_MAGIC)
+	{
 		return -ENOTTY;
+
+	}
 	if ((_IOC_NR(cmd) < DMA_BUF_LOCK_IOC_MINNR) || (_IOC_NR(cmd) > DMA_BUF_LOCK_IOC_MAXNR))
+	{
 		return -ENOTTY;
+	}
 
 	switch (cmd)
 	{
 		case DMA_BUF_LOCK_FUNC_LOCK_ASYNC:
 			if (size != sizeof(dma_buf_lock_k_request))
+			{
 				return -ENOTTY;
+			}
 			if (copy_from_user(&request, (void __user *)arg, size))
+			{
 				return -EFAULT;
+			}
 #if DMA_BUF_LOCK_DEBUG
 			printk("DMA_BUF_LOCK_FUNC_LOCK_ASYNC - %i\n", request.count);
 #endif

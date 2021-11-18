@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2011-2020 ARM Limited. All rights reserved.
@@ -30,7 +29,7 @@
 /* Spin lock protecting all Mali fences as fence->lock. */
 static DEFINE_SPINLOCK(kbase_fence_lock);
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 struct fence *
 kbase_fence_out_new(struct kbase_jd_atom *katom)
 #else
@@ -38,7 +37,7 @@ struct dma_fence *
 kbase_fence_out_new(struct kbase_jd_atom *katom)
 #endif
 {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence *fence;
 #else
 	struct dma_fence *fence;
@@ -99,7 +98,7 @@ kbase_fence_free_callbacks(struct kbase_jd_atom *katom)
 	return res;
 }
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 int
 kbase_fence_add_callback(struct kbase_jd_atom *katom,
 			 struct fence *fence,

@@ -1,6 +1,6 @@
 /*
  *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2018, 2020 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -17,25 +17,6 @@
  * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  * SPDX-License-Identifier: GPL-2.0
- *
- *//* SPDX-License-Identifier: GPL-2.0 */
-/*
- *
- * (C) COPYRIGHT 2010-2018, 2020 ARM Limited. All rights reserved.
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU license.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, you can access it online at
- * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  */
 
@@ -54,7 +35,7 @@
 #include "mali_kbase_fence_defs.h"
 #include "mali_kbase.h"
 
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 extern const struct fence_ops kbase_fence_ops;
 #else
 extern const struct dma_fence_ops kbase_fence_ops;
@@ -68,7 +49,7 @@ extern const struct dma_fence_ops kbase_fence_ops;
 * @node:     List head for linking this callback to the katom
 */
 struct kbase_fence_cb {
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 	struct fence_cb fence_cb;
 	struct fence *fence;
 #else
@@ -85,7 +66,7 @@ struct kbase_fence_cb {
  *
  * return: A new fence object on success, NULL on failure.
  */
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 struct fence *kbase_fence_out_new(struct kbase_jd_atom *katom);
 #else
 struct dma_fence *kbase_fence_out_new(struct kbase_jd_atom *katom);
@@ -188,7 +169,7 @@ static inline int kbase_fence_out_signal(struct kbase_jd_atom *katom,
  * Return: 0 on success: fence was either already signaled, or callback was
  * set up. Negative error code is returned on error.
  */
-#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 int kbase_fence_add_callback(struct kbase_jd_atom *katom,
 			     struct fence *fence,
 			     fence_func_t callback);

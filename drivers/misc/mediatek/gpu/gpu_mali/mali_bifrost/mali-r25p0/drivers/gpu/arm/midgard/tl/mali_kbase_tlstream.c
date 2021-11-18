@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2015-2020 ARM Limited. All rights reserved.
@@ -150,12 +149,12 @@ void kbase_tlstream_init(
 	unsigned int i;
 
 	KBASE_DEBUG_ASSERT(stream);
-	KBASE_DEBUG_ASSERT(stream_type < TL_STREAM_TYPE_COUNT);
+	KBASE_DEBUG_ASSERT(TL_STREAM_TYPE_COUNT > stream_type);
 
 	spin_lock_init(&stream->lock);
 
 	/* All packets carrying tracepoints shall be numbered. */
-	if (tl_stream_cfg[stream_type].pkt_type == TL_PACKET_TYPE_BODY)
+	if (TL_PACKET_TYPE_BODY == tl_stream_cfg[stream_type].pkt_type)
 		stream->numbered = 1;
 	else
 		stream->numbered = 0;
@@ -218,8 +217,7 @@ static size_t kbasep_tlstream_msgbuf_submit(
 
 	/* Increasing write buffer index will expose this packet to the reader.
 	 * As stream->lock is not taken on reader side we must make sure memory
-	 * is updated correctly before this will happen.
-	 */
+	 * is updated correctly before this will happen. */
 	smp_wmb();
 	atomic_inc(&stream->wbi);
 
@@ -253,7 +251,7 @@ char *kbase_tlstream_msgbuf_acquire(
 	wb_size    = atomic_read(&stream->buffer[wb_idx].size);
 
 	/* Select next buffer if data will not fit into current one. */
-	if (wb_size + msg_size > PACKET_SIZE) {
+	if (PACKET_SIZE < wb_size + msg_size) {
 		wb_size = kbasep_tlstream_msgbuf_submit(
 				stream, wb_idx_raw, wb_size);
 		wb_idx  = (wb_idx_raw + 1) % PACKET_COUNT;

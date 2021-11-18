@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2014-2020 ARM Limited. All rights reserved.
@@ -20,6 +19,7 @@
  * SPDX-License-Identifier: GPL-2.0
  *
  */
+
 
 /*
  * Register backend context / address space management
@@ -190,8 +190,8 @@ int kbase_backend_find_and_release_free_address_space(
 			}
 
 			/* Context was retained while locks were dropped,
-			 * continue looking for free AS
-			 */
+			 * continue looking for free AS */
+
 			mutex_unlock(&js_devdata->runpool_mutex);
 			mutex_unlock(&as_js_kctx_info->ctx.jsctx_mutex);
 

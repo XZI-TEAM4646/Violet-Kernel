@@ -1,7 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
- * (C) COPYRIGHT 2019-2020 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -23,7 +22,6 @@
 
 #include <mali_kbase.h>
 #include <mali_kbase_defs.h>
-#include <gpu/mali_kbase_gpu_fault.h>
 
 const char *kbase_gpu_access_type_name(u32 fault_status)
 {

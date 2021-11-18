@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2014-2020 ARM Limited. All rights reserved.
@@ -20,6 +19,7 @@
  * SPDX-License-Identifier: GPL-2.0
  *
  */
+
 
 /*
  * HW access job manager common APIs

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *
  * (C) COPYRIGHT 2014, 2017-2020 ARM Limited. All rights reserved.
@@ -22,8 +21,7 @@
  */
 
 /* Kernel UTF suite, test and fixture management including user to kernel
- * interaction
- */
+ * interaction */
 
 #include <linux/list.h>
 #include <linux/slab.h>
@@ -600,7 +598,7 @@ static int create_fixture_variant(struct kutf_test_function *test_func,
 		goto fail_file;
 	}
 
-#if KERNEL_VERSION(4, 7, 0) <= LINUX_VERSION_CODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 	tmp = debugfs_create_file_unsafe(
 #else
 	tmp = debugfs_create_file(
@@ -636,7 +634,7 @@ static void kutf_remove_test_variant(struct kutf_test_fixture *test_fix)
 	kfree(test_fix);
 }
 
-#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
 /* Adapting to the upstream debugfs_create_x32() change */
 static int ktufp_u32_get(void *data, u64 *val)
 {
@@ -681,7 +679,7 @@ void kutf_add_test_with_filters_and_data(
 	}
 
 	test_func->filters = filters;
-#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
 	tmp = debugfs_create_file_unsafe("filters", S_IROTH, test_func->dir,
 					 &test_func->filters, &kutfp_fops_x32_ro);
 #else
@@ -694,7 +692,7 @@ void kutf_add_test_with_filters_and_data(
 	}
 
 	test_func->test_id = id;
-#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
 	debugfs_create_u32("test_id", S_IROTH, test_func->dir,
                        &test_func->test_id);
 #else

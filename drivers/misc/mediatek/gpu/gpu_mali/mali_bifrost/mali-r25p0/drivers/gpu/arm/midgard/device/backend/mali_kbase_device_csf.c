@@ -129,8 +129,6 @@ static int kbase_backend_late_init(struct kbase_device *kbdev)
 
 	init_waitqueue_head(&kbdev->hwaccess.backend.reset_wait);
 
-	/* kbase_pm_context_idle is called after the boot of firmware */
-
 	return 0;
 
 fail_update_l2_features:
@@ -148,7 +146,6 @@ fail_interrupt_test:
 
 	kbase_backend_timer_term(kbdev);
 fail_timer:
-	kbase_pm_context_idle(kbdev);
 	kbase_hwaccess_pm_halt(kbdev);
 fail_pm_powerup:
 	kbase_reset_gpu_term(kbdev);
@@ -209,26 +206,20 @@ static const struct kbase_device_init dev_init[] = {
 	{kbase_clk_rate_trace_manager_init,
 			kbase_clk_rate_trace_manager_term,
 			"Clock rate trace manager initialization failed"},
-	{kbase_device_hwcnt_backend_csf_if_init,
-			kbase_device_hwcnt_backend_csf_if_term,
-			"GPU hwcnt backend CSF interface creation failed"},
-	{kbase_device_hwcnt_backend_csf_init,
-			kbase_device_hwcnt_backend_csf_term,
+	{kbase_device_hwcnt_backend_jm_init,
+			kbase_device_hwcnt_backend_jm_term,
 			"GPU hwcnt backend creation failed"},
 	{kbase_device_hwcnt_context_init, kbase_device_hwcnt_context_term,
 			"GPU hwcnt context initialization failed"},
-	{kbase_backend_late_init, kbase_backend_late_term,
-			"Late backend initialization failed"},
-	{kbase_device_csf_firmware_init, kbase_device_csf_firmware_term,
-			"Firmware initialization failed"},
-	{kbase_device_hwcnt_backend_csf_metadata_init,
-			kbase_device_hwcnt_backend_csf_metadata_term,
-			"GPU hwcnt backend metadata creation failed"},
 	{kbase_device_hwcnt_virtualizer_init,
 			kbase_device_hwcnt_virtualizer_term,
 			"GPU hwcnt virtualizer initialization failed"},
 	{kbase_device_vinstr_init, kbase_device_vinstr_term,
 			"Virtual instrumentation initialization failed"},
+	{kbase_backend_late_init, kbase_backend_late_term,
+			"Late backend initialization failed"},
+	{kbase_device_csf_firmware_init, kbase_device_csf_firmware_term,
+			"Firmware initialization failed"},
 #ifdef MALI_KBASE_BUILD
 	{kbase_device_debugfs_init, kbase_device_debugfs_term,
 			"DebugFS initialization failed"},
